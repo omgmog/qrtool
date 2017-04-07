@@ -1,0 +1,360 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <link rel="manifest" href="manifest.json">
+  <link rel="canonical" href="https://qrtool.omgmog.net"/>
+  <title>QR Tool</title>
+  <style>
+    html,
+    body, 
+    main {
+      margin: 0;
+      padding: 0;
+      height: 100vh;
+      width: 100vw;
+      overflow: hidden;
+      display: block;
+    }
+    html {
+      font-size: calc(1em + .6vmax);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol";
+      color: #333;
+      background-color: #fafafa;
+    }
+    body {
+      line-height: 1.5;
+    }
+    h1, h2 {
+      margin: 0;
+      padding: 1rem 0;
+      line-height: 1;
+      font-size: 2rem;
+    }
+
+    .btn {
+      background-color: #333;
+      color: #fafafa;
+      display: inline-block;
+      margin: 1rem auto;
+      padding: .25rem 2rem;
+      text-transform: uppercase;
+      font-size: 2rem;
+      font-weight: bold;
+      box-shadow: 5px 5px 0 #bbb;
+      transition: .25s;
+      border: 0;
+    }
+    .btn:hover,
+    .btn:active,
+    .btn:focus {
+      transform: translateY(-5px);
+      box-shadow: 5px 10px 0 #bbb;
+    }
+    .back {
+      position: fixed;
+      left: 1rem;
+      top: 1rem;
+      padding: 0 .25rem .5rem;
+    }
+    .flip {
+      position: fixed;
+      right: 1rem;
+      top: 1rem;
+      padding: 0 .25rem .5rem;
+    }
+
+    .home.active ~ .back,
+    .home.active ~ .flip,
+    .history.active ~ .flip,
+    .create.active ~ .flip {
+      opacity: 0;
+      transform: translateX(-100%);
+    }
+    .panel {
+      flex-direction: column;
+      justify-content: flex-start;
+      width: 100vw;
+      height: 100vh;
+      text-align: center;
+      top: 0;
+      transform: translateX(100vw);
+      bottom: 0;
+      transition: .25s;
+      display: flex;
+      position: fixed;
+    }
+    .panel.active {
+      transform: none;
+    }
+    .panel.scan {
+    }
+    .panel.create {
+    }
+
+    .panel.create .form {
+      display: flex;
+      flex-direction: column;
+      width: 100%;
+    }
+    .form textarea {
+      width: 100%;
+      height: 40vh;
+      margin-bottom: 1rem;
+    }
+    .panel.create .qrcode-wrapper {
+      display: none;
+    }
+    
+    .panel.create.show .form {
+      display: none;
+    }
+    .panel.create.show .qrcode-wrapper {
+      display: block;
+    }
+    
+    .scan-wrapper,
+    .form,
+    .qrcode-wrapper {
+      margin: auto;
+      max-width: 80%;
+      height: auto;
+    }
+    .qrcode-wrapper * {
+      max-width: 100%;
+      height: auto;
+    }
+    .qrcode-wrapper #qrcode {
+    }
+    .qrcode-wrapper #qrcode::after,
+    .scan-wrapper::after {
+      content: attr(title);
+    }
+    .scan-wrapper {
+      position: relative;
+    }
+    .scan-wrapper video {
+      width: 100%;
+      height: auto;
+    }
+    .scan-wrapper .guide {
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      margin: auto;
+      width: 40vw;
+      height: 40vw;
+      background: rgba(0,255,0,.5);
+      opacity: 0;
+      transition: .25s;
+    }
+    .scan-wrapper .guide.show {
+      opacity: 1;
+    }
+    .btn.do-scan.scanning {
+      background-color: orange;
+    }
+    .btn.do-scan.found {
+      background-color: green;
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <div class="panel home active">
+      <h1>QR Tool</h1>
+      <div class="btn scan">Scan</div>
+      <div class="btn create">Create</div>
+      <div class="btn history">History</div>
+    </div>
+    <div class="panel scan">
+      <h2>
+        Scan
+      </h2>
+      <div class="scan-wrapper">
+        <video id="scan_qr" autoplay></video>
+        <div class="guide"></div>
+      </div>
+      <div class="btn do-scan">Scan</div>
+    </div>
+    <div class="panel create">
+      <h2>
+        Create
+      </h2>
+      <form id="new_qr_data" class="form">
+        <label>Enter the text to encode</label>
+        <textarea placeholder="e.g. https://omgmog.net"></textarea>
+        <button class="btn">Encode</button>
+      </form>
+      <div class="qrcode-wrapper">
+        <div id="qrcode"></div>
+        <div class="btn new">Another</div>
+      </div>
+    </div>
+    <div class="panel history">
+      <h2>
+        History
+      </h2>
+      <ul>
+      </ul>
+    </div>
+    <div class="btn back">&larr;</div>
+    <div class="btn flip">⟳</div>
+  </main>
+  <script src="qrcode.min.js"></script>
+  <script src="qcode-decoder.min.js"></script>
+  <script>
+    (function () {
+      'use strict';
+      var $ = document.querySelectorAll.bind(document);
+      Element.prototype.on = Element.prototype.addEventListener;
+
+      var views = ['scan', 'create', 'history'];
+
+      var qrEncode = new QRCode($('#qrcode')[0], {
+        width: 512,
+        height: 512
+      });
+      var qrDecode = new QCodeDecoder();
+
+      var errorCallback = function(e) {
+        console.log('Error:', e);
+      };
+      views.forEach(function (element) {
+        $(`.home .btn.${element}`)[0].on('click', function (e) {
+          $('.active')[0].classList.remove('active');
+          $(`.panel.${element}`)[0].classList.add('active');
+          if (element === 'scan') {
+            startVideo();
+          }
+          if (element === 'create') {
+            $('.form textarea')[0].focus();
+          }
+          if (element === 'history') {
+            renderResults();
+          }
+        });
+      });
+
+      $('.back')[0].on('click', function (e) {
+        $('.active')[0].classList.remove('active');
+        $(`.panel.home`)[0].classList.add('active');
+        pauseVideo();
+      });
+
+      var pauseVideo = function () {
+        console.log('video would be paused here');
+        qrDecode.stop();
+        $('.video')[0].stop();
+        $('.scan-wrapper')[0].setAttribute('title', '');
+      };
+      var startVideo = function () {
+        console.log('video would be started here');
+        var front = false;
+        $('.btn.flip')[0].on('click', function () { front = !front; });
+
+        var constraints = { video: { facingMode: (front? "user" : "environment") } };
+        navigator.getUserMedia(constraints, function(localMediaStream) {
+          var video = $('video')[0];
+          video.src = window.URL.createObjectURL(localMediaStream);
+          video.play();
+          video.onloadedmetadata = function(e) {
+          };
+        }, errorCallback);
+      };
+
+      var encodeQR = function () {
+        var form = $('#new_qr_data textarea')[0];
+        var formvalue = form.value;
+        if (!formvalue) {
+          // empty form
+          alert('You should enter some text');
+        } else {
+          qrEncode.clear();
+          qrEncode.makeCode(formvalue);
+
+          $('.panel.create')[0].classList.add('show');
+          form.value = "";
+        }
+      };
+
+      var decodeQR = function () {
+        $('.guide')[0].classList.add('show');
+        $('.btn.do-scan')[0].classList.add('scanning');
+        qrDecode.decodeFromCamera($('video')[0], function (err, result) {
+          if (err)
+            return console.log(err.message);
+          if (result !== null) {
+            console.log(result);
+            $('.btn.do-scan')[0].classList.remove('scanning');
+            $('.btn.do-scan')[0].classList.add('found');
+            setTimeout(function () {
+              $('.btn.do-scan')[0].classList.remove('scanning');
+              $('.btn.do-scan')[0].classList.remove('found');
+            }, 1000);
+            $('.scan-wrapper')[0].setAttribute('title', result);
+            $('.guide')[0].classList.remove('show');
+            results.push(result);
+            saveQRresults(results);
+            qrDecode.stop();
+          }
+        }, true);
+      };
+      $('.btn.do-scan')[0].on('click', function (e) {
+        decodeQR();
+      });
+
+      $('#new_qr_data button')[0].on('click', function (e) {
+        e.preventDefault();
+        encodeQR();
+      });
+      $('.btn.new')[0].on('click', function () {
+        $('.panel.create')[0].classList.remove('show');
+      });
+
+
+      var saveQRresults = function (results) {
+        var _results = JSON.stringify(results);
+        window.localStorage.setItem('QRresults', _results);
+        console.log('Saving', _results);
+      };
+
+      var getQRresults = function () {
+        var _results = window.localStorage.getItem('QRresults');
+        if (_results) {
+          _results = JSON.parse(_results);
+          console.log('Loading', _results);
+          return _results;
+        }
+        return null;
+      };
+
+      var results = getQRresults() || [];
+
+      var renderResults = function () {
+        if (!results.length) return;
+        // first clean up the old list
+        $('.history ul li').forEach(function(li) {
+          li.parentElement.removeChild(li);
+        });
+        // then make it 
+        results.forEach(function (result) {
+          var li = document.createElement('li');
+          li.innerText = result;
+          $('.history ul')[0].appendChild(li);
+        });
+      };
+    }());
+  </script>
+  <script>
+  if (navigator.serviceWorker) {
+    navigator.serviceWorker.register('serviceWorker.js', {
+      scope: '/'
+    });
+  }
+  </script>
+</body>
+</html>
